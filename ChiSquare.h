@@ -8,86 +8,107 @@
 using namespace std;
 using namespace boost::math;
 
+typedef long double       Precision;  // good enough..?
+typedef vector<Precision> Data;       //
+
+
 static bool printed_yates = false;
+
 
 class ChiSquare {
 private:
+    int num_sets;
+public:
+    void calcExpecteds(Data &observed, Data &expected)
+    {
+        int obs_size = observed.size();
+        Data set_totals(num_sets, 0);
+        Data col_totals(num_sets, 0);
 
-    inline long double single_chi(double &obs, double &col_total, long double &set_fract, int num_vals_per_set){
-        long double\
-                expected = col_total*set_fract,\
-                interm_chisquar = obs-expected;
+        Precision grand_total = 0;
+        int vals_per_set = obs_size / num_sets;
 
-        //Yates correction
-        if (num_vals_per_set==2)
-            interm_chisquar += interm_chisquar>0?-0.5:0.5;
-            if (!printed_yates){
-                cerr << "Nb: Applied Yates correction\n" << endl;
-                printed_yates=true;
-            }
 
-//        cerr << "obs=" << obs << ", set_fract=" << set_fract << endl;
-//        cerr << "exp=" << expected << ",  interm=" << interm_chisquar << endl;
+        // Make set and column totals
+        /*   e.g. for 2 set observeds: 667  3   1004  1
+         *        set_totals = [ 667 + 3   , 1004 + 1]
+         *        col_totals = [ 667 + 1004,    3 + 1]
+         */
+        for (int i=0; i < obs_size; i++)
+        {
+            int set = i / vals_per_set;
+            int col = i % vals_per_set;
 
-        if (expected==0) return -1;
+            set_totals[set] += observed[i];
+            col_totals[col] += observed[i];
+            grand_total     += observed[i];
+        }
 
-        return (interm_chisquar*interm_chisquar)/expected;
+        // Generate expecteds
+        for (int i=0; i < obs_size; i++)
+        {
+            int set = i / vals_per_set,
+                col = i % vals_per_set;
+
+            Precision &set_total = set_totals[set],
+                        &col_total = col_totals[col];
+
+            Precision expect = set_total * (col_total / grand_total );
+            expected[i] = expect;
+        }
     }
 
 
-
-public:
-    //Each row contains S sets of data each containing 2 numbers
-    ChiSquare(
-            vector<vector<int> > &row_data,
-            chi_squared_distribution<long double> &dist,
-            int &num_vals_per_set, int &sigfig)
+    void calcChisquareds(Data &observed, Data &expected, Data &chisq)
     {
-        int num_sets = row_data.size();
+        for (int i=0; i < observed.size(); i++)
+        {
+               Precision &obs = observed[i],
+                           &exp = expected[i];
 
-//        cerr << "num_sets=" << num_sets << endl;
+               Precision interm_chisquar = obs-exp;
+               if(interm_chisquar<0){interm_chisquar *= -1;}
 
-        //1. Get totals
-        int total=0;
-        vector<long double> set_totals(num_sets,0);
-        vector<double> column_totals(num_vals_per_set,0); // {A1+B1+C1, A2+B2+C2, A3+...}
+               if (num_sets == 2){
+                   interm_chisquar -= 0.5;
+                   if (!printed_yates){
+                       cerr << "Applied Yates correction\n" << endl;
+                       printed_yates=true;
+                   }
+               }
 
-        for (int s=0; s< num_sets; s++){
-            int s_total=0;
+               Precision chi = (interm_chisquar*interm_chisquar)/exp;
+               chisq[i] = chi;
+        }
+    }
 
-            for (int c=0; c< num_vals_per_set; c++){
-                double val = row_data[s][c];
 
-                column_totals[c] += val;
-                s_total += val;
-            }
-            set_totals[s] = s_total;
-            total += s_total;
-
-//            cerr << "s_total=" << s_total << endl;
+    void grandChiAndPval(Data &chisq, Data &result, chi_squared_distribution<Precision> *dist)
+    {
+        long double total = 0;
+        for (int i=0; i < chisq.size(); i ++){
+            total += chisq[i];
         }
 
-        //2. Compute fractions
-        vector<long double> set_fracts(num_sets,0);
-        for (int s=0; s< num_sets; s++)  set_fracts[s] = set_totals[s]/total;
+        long double pval =(total>0?cdf(complement(*dist,total)):-1);
+        result[0] = total;
+        result[1] = pval;
+    }
 
-        //3. Compute individual chisquares, add to running total;
-        cout << setprecision(sigfig) << flush;
 
-        long double total_chisq=0;
-        for (int s=0; s< num_sets; s++){
-            for (int c=0; c < num_vals_per_set; c++){
-                double val = row_data[s][c];
-                cout << val << ' ' << flush;
+    // Deals with individual rows/sets
+    ChiSquare(int &numsets,
+              chi_squared_distribution<Precision> *dist,
+              Data &observed, // size N
+              Data &expected, // size N
+              Data &chisq,    // size N
+              Data &result)   // size 2 (total chisq, pval)
+    {
+        num_sets = numsets;
+        calcExpecteds(observed, expected);
+        calcChisquareds(observed, expected, chisq);
 
-                total_chisq += single_chi(val, column_totals[c], set_fracts[s], num_vals_per_set);
-            }
-        }
-        cout << "  chisq=" << total_chisq
-             << "  p-val=" << (total_chisq>0?cdf(complement(dist,total_chisq)):-1)
-             << endl;
-//        exit(0);
-
+        grandChiAndPval(chisq, result, dist);
     }
 };
 

@@ -2,15 +2,15 @@
 #include <fstream>
 #include <string>
 
-#include "ChiSquare.h"
+#include "ChiSquareALL.h"
 
 using namespace boost;
 
 //inline expands the code inside the scope of where it is called. Almost a macro function
-inline double convertToDouble(std::string const& s){
-  std::istringstream i(s); double x;
+inline Precision convertToPrecision(std::string const& s){
+  std::istringstream i(s); Precision x;
   if (!(i >> x)){
-    cerr << "Could not convert to double: " << s << endl;
+    cerr << "Could not convert to precision format: " << s << endl;
     exit(-1);
   }
   return x;
@@ -20,6 +20,15 @@ inline int convertToInt(std::string const& s){
   std::istringstream i(s); int x;
   if (!(i >> x)){
     cerr << "Could not convert to int: " << s << endl;
+    exit(-1);
+  }
+  return x;
+}
+
+inline Pos convertToPosition(std::string const& s){
+  std::istringstream i(s);  Pos x;
+  if (!(i >> x)){
+    cerr << "Could not convert to position: " << s << endl;
     exit(-1);
   }
   return x;
@@ -37,68 +46,69 @@ void checkArg(char * arg, string valid_arg_start){
 int main(int argc, char ** argv)
 {
     //Args
-    string setnum_id("--#sets=");
-    string valset_id("--#valsper=");
-    string sigfig_id("--#sf=");
+    string setnum_id("--sets=");
+    string sigfig_id("--sf=");
 
     if (argc<4) {
         cerr << endl;
         cerr << "Takes in a text file where each row contains several different sets and calculates the chi-squared and p-value across all sets for that row.";
         cerr << endl;
+        cerr << "The first column contains position, and will not be processed." << endl;
         cerr << "\nEach row of the text file is delimited by spaces in the format:";
-        cerr << "\n\trow1:\tA11 A12 B11 B12 C11 C12 D11 D12 ... etc";
-        cerr << "\n\trow2:\tA21 A22 B21 B22 C21 C22 D21 D22 ... etc" << endl;
+        cerr << "\n\tpos1\tA11 A12 B11 B12 ...";
+        cerr << "\n\tpos2\tA21 A22 B21 B22 ..." << endl;
+        cerr << "\n\tpos3\tA31 A32 B31 B32 ..." << endl;
         cerr << "\tetc..\n";
         cerr << endl;
-        cerr << "Set number MUST be specified to indicate how many values there are per set (in the above example there are 2).\n" << endl;
-        cerr << "  usage:  " << argv[0] << " <text.input> "<< setnum_id << "N " << valset_id << "N [" << sigfig_id << "N]" <<  endl;
+        cerr << "In the above example there are 2 sets (A and B) with 4 values per set\n" << endl;
+        cerr << "  usage:  " << argv[0] << " <text.input> "<< setnum_id << "N " << sigfig_id << "N" <<  endl;
+        cerr << "\ndefault output is to 5 sigfig" << endl;
         cerr << endl;
         exit(-1);
     }
 
     //File arg
-    ifstream file(argv[1]);
+    ifstream file(argv[1]); //
 
-    //////////Flags
+    // Flags
     //Reqs
     checkArg(argv[2],setnum_id);
-    checkArg(argv[3],valset_id);
+    checkArg(argv[3],sigfig_id);
 
     int setnum = convertToInt(string(argv[2]).substr(setnum_id.size()));
-    int valset = convertToInt(string(argv[3]).substr(valset_id.size()));
+    int sigfig = convertToInt(string(argv[3]).substr(sigfig_id.size()));
 
-    //Opts
-    int sigfig=3; //default
-    if (argc==5){
-        checkArg(argv[4],sigfig_id);
-        sigfig = convertToInt(string(argv[4]).substr(sigfig_id.size()));
-    }
-
-    /////////Begin
-    chi_squared_distribution<long double> dist(setnum-1);  // Make chisq once
 
     //Read in file, process lines
     typedef tokenizer<char_separator<char> > tokenizer;
 
+    ChiSquareALL ch(setnum, sigfig);
+
+    vector<Data> &observeds = ch.observeds;
+    Positions    &positions = ch.positions;
+
     string line;
     while(getline(file, line))
     {
-        vector<vector<int> > row_data;
         tokenizer tok(line);
 
-        for (tokenizer::iterator beg=tok.begin(); beg!=tok.end(); false) {
-            vector<int> val_in_set;
-            for (int r=0; r < valset; r++){
-                int val = convertToInt(*beg);
+        for (tokenizer::iterator beg=tok.begin(); beg!=tok.end(); false)
+        {
+            Data obs_line;
 
-                val_in_set.push_back(val);
+            Pos position = convertToPosition(*beg);
+            positions.push_back(position);
 
-                if ((++beg).at_end())break;
+            while(!((++beg).at_end())){
+                int val = convertToPrecision(*beg);
+                obs_line.push_back(val);
             }
-            row_data.push_back( val_in_set );
+
+            observeds.push_back(obs_line);
         }
-        ChiSquare(row_data, dist, valset, sigfig);
-    }
+    }   
+    ch.process();
+
     return 0;
 }
 
